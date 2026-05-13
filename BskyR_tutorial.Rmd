@@ -53,7 +53,7 @@ You can create an app password from Bluesky settings. This is safer because you 
 ## Set up the connection to Bluesky
 ## Store details for API usage
 set_bluesky_user("Your_user_name.bsky.social")
-set_bluesky_pass("Your_app_key")
+set_bluesky_pass("Your_app_password")
 ```
 
 You can then authenticate once at the beginning of your script.
