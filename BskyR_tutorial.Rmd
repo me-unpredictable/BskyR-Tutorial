@@ -128,10 +128,11 @@ head(profile_preview)
 # Search for posts
 
 `bs_search_posts()` searches public Bluesky posts that match a keyword, phrase, or hashtag. This is useful when collecting posts about a class, event, campaign, research topic, or public discussion.
-
+The default limit for post retrieval is 25. To retrieve more posts use `limit` argument with a required post number. 
 ```{r search-posts, eval=FALSE}
 posts <- bs_search_posts("#WSUCOMP7025")
-
+# to get higher posts
+# posts <- bs_search_posts("#WSUCOMP7025",limit=100) # it will fetch maximum of 100 posts
 head(posts)
 ```
 
