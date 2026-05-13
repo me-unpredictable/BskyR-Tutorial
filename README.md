@@ -5,7 +5,7 @@ This repository contains a beginner-friendly R Markdown tutorial for using the [
 The main tutorial file is:
 
 ```text
-BskyR_extended_tutorial_no_pipes.Rmd
+BskyR_tutorial.Rmd
 ```
 
 The tutorial is written for new R users. It avoids pipeline-style code and shows each step separately so that the purpose of every line is easier to understand.
@@ -91,7 +91,7 @@ Do not commit your real app password to GitHub.
 Open the R Markdown file in RStudio:
 
 ```text
-BskyR_extended_tutorial_no_pipes.Rmd
+BskyR_tutorial.Rmd
 ```
 
 Then run the chunks one by one.
