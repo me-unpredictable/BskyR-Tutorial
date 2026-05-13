@@ -1,0 +1,783 @@
+---
+title: "BskyR Tutorial"
+author: "Vishal"
+date: "2026-05-01"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Introduction
+
+This tutorial introduces the `bskyr` library for working with Bluesky from R. It starts from authentication, then moves into practical tasks such as retrieving profile data, searching posts, collecting posts from an account, reading followers and follows, checking engagement, exporting data, and safely creating posts.
+
+The main idea is simple: `bskyr` connects R to Bluesky's AT Protocol API and returns most results as tidy `tibble` objects. This makes the package useful for social media analysis, content tracking, account monitoring, and small automation scripts.
+
+In this tutorial, we focus on functions that are useful in practical data collection workflows. Some functions can change your Bluesky account, such as posting, liking, reposting, following, or blocking. Those examples are marked with `eval=FALSE` so they do not run accidentally when the R Markdown file is knitted.
+
+# Installation and packages
+
+Install `bskyr` from CRAN if you have not installed it already.
+
+```{r install-bskyr, eval=FALSE}
+install.packages("bskyr")
+```
+
+Load the packages used in this tutorial.
+
+```{r packages}
+library(bskyr)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(readr)
+
+## This tutorial avoids pipeline-style code.
+## Each step is written separately so beginners can see what every line does.
+```
+
+# Authentication
+
+Before collecting data, you need to authenticate with Bluesky. Use your Bluesky handle without the `@` symbol. For the password, use a Bluesky app password, not your normal account password.
+
+You can create an app password from Bluesky settings. This is safer because you can revoke it later without changing your main account password.
+
+```{r auth-setup, eval=FALSE}
+## Set up the connection to Bluesky
+## Store details for API usage
+set_bluesky_user("Your_user_name.bsky.social")
+set_bluesky_pass("Your_app_key")
+```
+
+You can then authenticate once at the beginning of your script.
+
+```{r auth-run, eval=FALSE}
+auth <- bs_auth(user = bs_get_user(), pass = bs_get_pass())
+```
+
+A useful check before running a script is to confirm that the username and password are available.
+
+```{r check-auth, eval=FALSE}
+has_bluesky_user()
+has_bluesky_pass()
+```
+
+If both return `TRUE`, your script can access the stored credentials.
+
+# Set a target account
+
+It is useful to define the account handle once, then reuse it throughout the tutorial.
+
+```{r target-account}
+target_handle <- "meunpredictable.bsky.social"
+```
+
+# Get details of an account
+
+`bs_get_profile()` retrieves profile details for a Bluesky account. It returns a tibble with account metadata such as DID, handle, display name, profile description, follower count, following count, and post count.
+
+```{r profile, eval=FALSE}
+acc_profile <- bs_get_profile(target_handle)
+
+head(acc_profile)
+```
+
+To access individual attributes, use `$`.
+
+```{r profile-summary, eval=FALSE}
+total_followers <- acc_profile$followers_count
+total_following <- acc_profile$follows_count
+acc_name <- acc_profile$display_name
+acc_handle <- acc_profile$handle
+post_count <- acc_profile$posts_count
+
+cat(
+  "Account name:", acc_name,
+  "\nAccount handle:", acc_handle,
+  "\nAccount following count:", total_following,
+  "\nAccount follower count:", total_followers,
+  "\nTotal post count:", post_count
+)
+```
+
+You can also retrieve multiple profiles at once.
+
+```{r multiple-profiles, eval=FALSE}
+profiles <- bs_get_profile(
+  actors = c(
+    "meunpredictable.bsky.social",
+    "bsky.app"
+  )
+)
+
+profile_preview <- select(
+  profiles,
+  handle, display_name, followers_count, follows_count, posts_count
+)
+
+head(profile_preview)
+```
+
+# Search for posts
+
+`bs_search_posts()` searches public Bluesky posts that match a keyword, phrase, or hashtag. This is useful when collecting posts about a class, event, campaign, research topic, or public discussion.
+
+```{r search-posts, eval=FALSE}
+posts <- bs_search_posts("#WSUCOMP7025")
+
+head(posts)
+```
+
+The result is usually returned as a table where each row represents one post. Before extracting information, it is useful to check the available columns.
+
+```{r check-post-columns, eval=FALSE}
+names(posts)
+```
+
+The actual post text is commonly stored inside the `record` column. Since this column contains structured information, we can create a small function to extract only the text.
+
+```{r extract-text-function, eval=FALSE}
+extract_text <- function(record_item) {
+  text_value <- record_item$text
+  return(text_value)
+}
+```
+
+Now apply the function to every item inside the `record` column.
+
+```{r extract-post-text, eval=FALSE}
+post_text <- sapply(posts$record, extract_text)
+
+head(post_text)
+```
+
+We can now add the extracted text back into the original table.
+
+```{r add-text-column, eval=FALSE}
+posts$text <- post_text
+
+head(posts)
+```
+
+To make the results easier to read, we can create a smaller table with only the most useful columns.
+
+```{r clean-post-table, eval=FALSE}
+post_summary <- posts[, c(
+  "display_handle",
+  "text",
+  "like_count",
+  "repost_count",
+  "reply_count",
+  "indexed_at"
+)]
+
+head(post_summary)
+```
+
+This creates a cleaner summary table showing the username, post text, engagement counts, and posting time.
+# Search posts with extra arguments
+
+You can search more carefully by using arguments such as `tag` and `sort`. For example, this searches posts about `ggplot2` with the `rstats` tag and returns the latest posts.
+
+```{r search-with-args, eval=FALSE}
+r_posts <- bs_search_posts(
+  q = "ggplot2",
+  tag = "rstats",
+  sort = "latest"
+)
+
+r_posts_preview <- select(
+  r_posts,
+  author_handle, like_count, repost_count, reply_count, indexed_at
+)
+
+head(r_posts_preview)
+```
+
+# Get posts from a specific account
+
+`bs_get_author_feed()` retrieves recent posts from a given actor. This is useful when you want to analyse an account's own content rather than search across Bluesky.
+
+```{r author-feed, eval=FALSE}
+feed <- bs_get_author_feed(target_handle)
+
+feed_preview <- select(
+  feed,
+  uri, author_handle, text, like_count, repost_count, reply_count, indexed_at
+)
+
+head(feed_preview)
+```
+
+You can create a simple engagement score from likes, reposts, and replies.
+
+```{r engagement-score, eval=FALSE}
+feed_with_engagement <- mutate(
+  feed,
+  engagement_score = like_count + repost_count + reply_count
+)
+
+feed_ranked <- arrange(
+  feed_with_engagement,
+  desc(engagement_score)
+)
+
+feed_summary <- select(
+  feed_ranked,
+  text, like_count, repost_count, reply_count, engagement_score, indexed_at
+)
+
+head(feed_summary)
+```
+
+# Paginate account posts
+
+Many API calls return one batch at a time. If there are more results, a cursor can be used to retrieve the next batch.
+
+```{r pagination-basic, eval=FALSE}
+feed_page_1 <- bs_get_author_feed(target_handle, limit = 50)
+
+next_cursor <- attr(feed_page_1, "cursor")$cursor
+
+feed_page_2 <- bs_get_author_feed(
+  actor = target_handle,
+  limit = 50,
+  cursor = next_cursor
+)
+
+all_posts <- bind_rows(feed_page_1, feed_page_2)
+
+head(all_posts)
+```
+
+For a larger collection, you can wrap this idea in a function.
+
+```{r pagination-function, eval=FALSE}
+get_author_feed_pages <- function(actor, pages = 3, limit = 50) {
+  out <- list()
+  cursor <- NULL
+
+  for (i in seq_len(pages)) {
+    page <- bs_get_author_feed(
+      actor = actor,
+      limit = limit,
+      cursor = cursor
+    )
+
+    out[[i]] <- page
+    cursor <- attr(page, "cursor")$cursor
+
+    if (is.null(cursor) || length(cursor) == 0) {
+      break
+    }
+  }
+
+  bind_rows(out)
+}
+
+my_recent_posts <- get_author_feed_pages(target_handle, pages = 3)
+
+head(my_recent_posts)
+```
+
+# Get list of accounts followed by the user
+
+`bs_get_follows()` retrieves the list of accounts followed by a user. The return object is a tibble. Use `head()` after collection when you only want to preview the first few rows. It takes an account handle as a mandatory argument and returns account-level attributes such as display name, handle, account description, account creation date, and viewer-related metadata.
+
+```{r get-follows, eval=FALSE}
+follows <- bs_get_follows(target_handle)
+
+follows_preview <- select(
+  follows,
+  display_name, handle, description, followers_count, follows_count
+)
+
+head(follows_preview)
+```
+
+To print account names and handles in a readable format:
+
+```{r print-follows, eval=FALSE}
+acc_names <- follows$display_name
+acc_handles <- follows$handle
+
+for (i in seq_len(nrow(follows))) {
+  cat(
+    "Account name:", acc_names[i],
+    ", Account handle:", acc_handles[i],
+    "\n"
+  )
+}
+```
+
+# Get list of accounts following the user
+
+`bs_get_followers()` retrieves the accounts that follow a user. This is useful for basic audience analysis.
+
+```{r get-followers, eval=FALSE}
+followers <- bs_get_followers(target_handle)
+
+followers_preview <- select(
+  followers,
+  display_name, handle, description, followers_count, follows_count
+)
+
+head(followers_preview)
+```
+
+To print follower names and handles:
+
+```{r print-followers, eval=FALSE}
+acc_names <- followers$display_name
+acc_handles <- followers$handle
+
+for (i in seq_len(nrow(followers))) {
+  cat(
+    "Account name:", acc_names[i],
+    ", Account handle:", acc_handles[i],
+    "\n"
+  )
+}
+```
+
+# Compare followers and follows
+
+A useful social graph task is comparing accounts you follow with accounts that follow you.
+
+```{r compare-social-graph, eval=FALSE}
+following_handles <- follows$handle
+follower_handles <- followers$handle
+
+mutuals <- intersect(following_handles, follower_handles)
+not_following_back <- setdiff(following_handles, follower_handles)
+followers_you_do_not_follow <- setdiff(follower_handles, following_handles)
+
+cat("Mutual accounts:", length(mutuals), "\n")
+cat("Accounts you follow that do not follow back:", length(not_following_back), "\n")
+cat("Followers you do not follow:", length(followers_you_do_not_follow), "\n")
+```
+
+Create a tidy table of relationship types.
+
+```{r relationship-table, eval=FALSE}
+all_handles <- union(following_handles, follower_handles)
+
+relationship_table <- tibble(handle = all_handles)
+
+relationship_table <- mutate(
+  relationship_table,
+  you_follow = handle %in% following_handles,
+  follows_you = handle %in% follower_handles
+)
+
+relationship_table <- mutate(
+  relationship_table,
+  relationship = case_when(
+    you_follow & follows_you ~ "mutual",
+    you_follow & !follows_you ~ "you_follow_only",
+    !you_follow & follows_you ~ "follows_you_only",
+    TRUE ~ "unknown"
+  )
+)
+
+relationship_count <- count(relationship_table, relationship)
+
+relationship_count
+head(relationship_table)
+```
+
+# Search for accounts
+
+`bs_search_actors()` searches Bluesky accounts. This is helpful when you know a name, topic, organisation, or partial handle.
+
+```{r search-actors, eval=FALSE}
+actor_results <- bs_search_actors("rstats")
+
+actor_preview <- select(
+  actor_results,
+  handle, display_name, description, followers_count
+)
+
+head(actor_preview)
+```
+
+# Get suggested accounts
+
+`bs_get_actor_suggestions()` can retrieve suggested accounts. This can help when building starter lists or finding accounts related to your activity.
+
+```{r actor-suggestions, eval=FALSE}
+suggestions <- bs_get_actor_suggestions()
+
+suggestions_preview <- select(
+  suggestions,
+  handle, display_name, description
+)
+
+head(suggestions_preview)
+```
+
+# Get your home timeline
+
+`bs_get_timeline()` retrieves posts from your home timeline. This is self-focused because it depends on your authenticated account.
+
+```{r timeline, eval=FALSE}
+timeline <- bs_get_timeline(limit = 50)
+
+timeline_preview <- select(
+  timeline,
+  author_handle, text, like_count, repost_count, reply_count, indexed_at
+)
+
+head(timeline_preview)
+```
+
+# Get posts liked by an account
+
+`bs_get_likes()` retrieves posts liked by an actor. This can be useful for understanding topics an account engages with.
+
+```{r get-likes, eval=FALSE}
+liked_posts <- bs_get_likes(target_handle)
+
+liked_posts_preview <- select(
+  liked_posts,
+  author_handle, record_text, like_count, repost_count, reply_count
+)
+
+head(liked_posts_preview)
+```
+
+# Get likes, reposts, and quotes for a post
+
+If you have a post URI, you can inspect engagement around that post.
+
+First, get a post from your feed and store its URI.
+
+```{r post-uri, eval=FALSE}
+example_post_uri <- feed$uri[1]
+example_post_uri
+```
+
+Then retrieve likes, reposts, and quotes.
+
+```{r post-engagement, eval=FALSE}
+post_likes <- bs_get_post_likes(example_post_uri)
+post_reposts <- bs_get_reposts(example_post_uri)
+post_quotes <- bs_get_quotes(example_post_uri)
+
+post_likes_preview <- select(post_likes, handle, display_name)
+post_reposts_preview <- select(post_reposts, handle, display_name)
+post_quotes_preview <- select(post_quotes, author_handle, text, indexed_at)
+
+head(post_likes_preview)
+head(post_reposts_preview)
+head(post_quotes_preview)
+```
+
+# Retrieve a post thread
+
+`bs_get_post_thread()` retrieves a conversation thread around a post. This is useful when analysing replies and discussion context.
+
+```{r get-thread, eval=FALSE}
+thread <- bs_get_post_thread(example_post_uri)
+
+thread_preview <- select(
+  thread,
+  uri, author_handle, text, like_count, reply_count, indexed_at
+)
+
+head(thread_preview)
+```
+
+# Retrieve posts by URL or URI
+
+`bs_get_posts()` can retrieve one or more posts when you already know the post URL or URI.
+
+```{r get-posts, eval=FALSE}
+post_details <- bs_get_posts(example_post_uri)
+
+post_details_preview <- select(
+  post_details,
+  uri, author_handle, like_count, repost_count, reply_count, quote_count
+)
+
+head(post_details_preview)
+```
+
+# Get your notifications
+
+`bs_get_notification_count()` returns your unread notification count. `bs_get_notifications()` retrieves notification details.
+
+```{r notifications, eval=FALSE}
+notification_count <- bs_get_notification_count()
+notification_count
+
+notifications <- bs_get_notifications()
+
+notifications_preview <- select(
+  notifications,
+  reason, author_handle, indexed_at
+)
+
+head(notifications_preview)
+```
+
+# Get account preferences
+
+`bs_get_preferences()` returns preference settings for your authenticated account. You can access this only for yourself.
+
+```{r preferences, eval=FALSE}
+preferences <- bs_get_preferences()
+
+str(preferences, max.level = 1)
+```
+
+# Export collected data
+
+Since `bskyr` usually returns tibbles, you can save data using standard tidyverse tools.
+
+```{r export-csv, eval=FALSE}
+write_csv(feed_summary, "bsky_author_feed_summary.csv")
+write_csv(relationship_table, "bsky_relationship_table.csv")
+
+file.exists("bsky_author_feed_summary.csv")
+file.exists("bsky_relationship_table.csv")
+```
+
+You can also save R objects for later analysis.
+
+```{r export-rds, eval=FALSE}
+saveRDS(feed, "bsky_author_feed.rds")
+saveRDS(followers, "bsky_followers.rds")
+saveRDS(follows, "bsky_follows.rds")
+
+file.exists("bsky_author_feed.rds")
+file.exists("bsky_followers.rds")
+file.exists("bsky_follows.rds")
+```
+
+# Basic text analysis of posts
+
+After collecting posts, you can perform simple text analysis. The example below counts hashtags from post text.
+
+```{r hashtag-analysis, eval=FALSE}
+post_text_only <- select(feed, text)
+
+post_hashtags <- mutate(
+  post_text_only,
+  hashtags = str_extract_all(text, "#[A-Za-z0-9_]+")
+)
+
+post_hashtags <- unnest(post_hashtags, hashtags)
+
+hashtag_table <- count(post_hashtags, hashtags, sort = TRUE)
+
+head(hashtag_table)
+```
+
+You can also find the most common words. This is a simple version and does not remove all stop words.
+
+```{r word-count, eval=FALSE}
+post_words <- select(feed, text)
+post_words <- mutate(post_words, text = str_to_lower(text))
+post_words <- mutate(post_words, word = str_split(text, "\\s+"))
+post_words <- unnest(post_words, word)
+post_words <- mutate(post_words, word = str_remove_all(word, "[^a-z0-9#@]"))
+post_words <- filter(post_words, word != "")
+
+word_table <- count(post_words, word, sort = TRUE)
+
+head(word_table)
+```
+
+# Create a simple engagement plot
+
+You can quickly visualise engagement patterns from your own posts.
+
+```{r engagement-plot, eval=FALSE}
+library(ggplot2)
+
+plot_data <- mutate(feed_summary, post_number = row_number())
+
+ggplot(plot_data, aes(x = post_number, y = engagement_score)) +
+  geom_col() +
+  labs(
+    title = "Engagement score across recent Bluesky posts",
+    x = "Post number",
+    y = "Likes + reposts + replies"
+  )
+```
+
+# Make a post
+
+`bs_post()` creates a post on Bluesky. This changes your account, so keep this chunk as `eval=FALSE` unless you intentionally want to post.
+
+```{r make-post, eval=FALSE}
+new_post <- bs_post(text = "Testing a post from R using bskyr.")
+
+new_post
+```
+
+You can also post with images. Bluesky supports up to four images in a post. Always include alt text for accessibility.
+
+```{r make-image-post, eval=FALSE}
+image_post <- bs_post(
+  text = "Posting an image from R using bskyr.",
+  images = c("path/to/image1.jpg"),
+  images_alt = c("Description of the image for accessibility.")
+)
+
+image_post
+```
+
+# Like, repost, follow, and block
+
+The following functions change account state. Use them only when you clearly intend to perform the action.
+
+```{r account-actions, eval=FALSE}
+## Like a post
+bs_like(example_post_uri)
+
+## Repost a post
+bs_repost(example_post_uri)
+
+## Follow an account
+bs_follow("meunpredictable.bsky.social")
+
+## Block an account
+bs_block("meunpredictable.bsky.social")
+```
+
+There are also delete or undo functions for some actions.
+
+```{r undo-actions, eval=FALSE}
+## Unlike, unrepost, unfollow, or unblock where supported
+bs_unlike(example_post_uri)
+bs_delete_repost(example_post_uri)
+bs_unfollow("meunpredictable.bsky.social")
+bs_unblock("meunpredictable.bsky.social")
+
+cat("Action examples finished. These lines only run if eval is changed to TRUE.")
+```
+
+# Error handling
+
+When collecting data from APIs, errors can occur because of authentication issues, missing app passwords, rate limits, unavailable posts, or incorrect handles. Use `tryCatch()` to avoid breaking a long script.
+
+```{r safe-profile-function, eval=FALSE}
+safe_get_profile <- function(handle) {
+  tryCatch(
+    {
+      bs_get_profile(handle)
+    },
+    error = function(e) {
+      message("Could not retrieve profile for: ", handle)
+      message("Error: ", e$message)
+      tibble(handle = handle, error = e$message)
+    }
+  )
+}
+
+safe_profile <- safe_get_profile(target_handle)
+
+head(safe_profile)
+```
+
+# A reusable mini workflow
+
+The following function collects a compact account report containing profile metrics, recent post summaries, follower handles, and following handles.
+
+```{r account-report-function, eval=FALSE}
+create_bsky_account_report <- function(handle, post_pages = 2, limit = 50) {
+  profile <- bs_get_profile(handle)
+  recent_posts <- get_author_feed_pages(handle, pages = post_pages, limit = limit)
+  followers <- bs_get_followers(handle)
+  follows <- bs_get_follows(handle)
+
+  recent_posts <- mutate(
+    recent_posts,
+    engagement_score = like_count + repost_count + reply_count
+  )
+
+  post_summary <- summarise(
+    recent_posts,
+    collected_posts = n(),
+    total_likes = sum(like_count, na.rm = TRUE),
+    total_reposts = sum(repost_count, na.rm = TRUE),
+    total_replies = sum(reply_count, na.rm = TRUE),
+    average_engagement = mean(engagement_score, na.rm = TRUE),
+    max_engagement = max(engagement_score, na.rm = TRUE)
+  )
+
+  list(
+    profile = profile,
+    post_summary = post_summary,
+    recent_posts = recent_posts,
+    followers = followers,
+    follows = follows
+  )
+}
+
+report <- create_bsky_account_report(target_handle)
+
+report_profile_preview <- select(
+  report$profile,
+  handle, display_name, followers_count, follows_count, posts_count
+)
+
+report_profile_preview
+report$post_summary
+head(report$recent_posts)
+```
+
+# Save the account report
+
+```{r save-report, eval=FALSE}
+saveRDS(report, "bsky_account_report.rds")
+
+file.exists("bsky_account_report.rds")
+```
+
+# Practical notes
+
+Keep your app password out of public scripts. Do not upload `.Renviron` or any file containing credentials to GitHub. If you are using GitHub Actions or another automation system, store credentials as secrets.
+
+Use `eval=FALSE` for chunks that post, like, repost, follow, block, delete, or otherwise modify account state. This prevents accidental changes when knitting the document.
+
+When collecting large amounts of data, respect API limits and avoid unnecessary repeated requests. Store intermediate results with `saveRDS()` so that you do not need to recollect the same data every time.
+
+# Function summary
+
+| Function | Purpose | Changes account state? |
+|---|---|---|
+| `bs_auth()` | Authenticates your Bluesky account | No |
+| `set_bluesky_user()` | Stores Bluesky username | Local credential setting |
+| `set_bluesky_pass()` | Stores Bluesky app password | Local credential setting |
+| `bs_get_profile()` | Retrieves profile details | No |
+| `bs_search_posts()` | Searches public posts | No |
+| `bs_get_author_feed()` | Retrieves posts from an account | No |
+| `bs_get_timeline()` | Retrieves authenticated user's home timeline | No |
+| `bs_get_followers()` | Retrieves account followers | No |
+| `bs_get_follows()` | Retrieves accounts followed by a user | No |
+| `bs_search_actors()` | Searches accounts | No |
+| `bs_get_likes()` | Retrieves posts liked by an actor | No |
+| `bs_get_post_likes()` | Retrieves likes on a post | No |
+| `bs_get_reposts()` | Retrieves reposts of a post | No |
+| `bs_get_quotes()` | Retrieves quote posts | No |
+| `bs_get_post_thread()` | Retrieves a post thread | No |
+| `bs_get_notifications()` | Retrieves authenticated user's notifications | No |
+| `bs_post()` | Creates a post | Yes |
+| `bs_like()` | Likes a post | Yes |
+| `bs_repost()` | Reposts a post | Yes |
+| `bs_follow()` | Follows an account | Yes |
+| `bs_block()` | Blocks an account | Yes |
+
+# Conclusion
+
+This tutorial covered a practical `bskyr` workflow from authentication to account analysis. You can now authenticate, retrieve profile details, search posts, collect account feeds, inspect followers and follows, retrieve engagement data, export results, and build a reusable report. For social media analysis, the most useful pattern is to collect tidy data with `bskyr`, clean it in simple step-by-step R code, save it with `readr` or `saveRDS()`, and analyse it with standard R tools.
